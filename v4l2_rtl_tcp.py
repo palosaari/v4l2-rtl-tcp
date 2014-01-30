@@ -8,6 +8,7 @@ import threading
 import os
 import ctypes
 import fcntl
+import platform
 
 # V4L2 controls
 V4L2_CTRL_CLASS_USER    = 0x00980000;  # Old-style 'user' controls
@@ -16,21 +17,6 @@ V4L2_CID_BASE           = (V4L2_CTRL_CLASS_USER | 0x900);
 V4L2_CID_USER_BASE      = V4L2_CID_BASE;
 CID_TUNER_BW            = ((V4L2_CID_USER_BASE | 0xf000) + 11);
 CID_TUNER_GAIN          = ((V4L2_CID_USER_BASE | 0xf000) + 13);
-        
-# V4L2 IOCTLs
-CMD64_VIDIOC_DQBUF          = 0xc0585611;
-CMD64_VIDIOC_S_EXT_CTRLS    = 0xc0205648;
-CMD64_VIDIOC_S_FMT          = 0xc0d05605;
-CMD64_VIDIOC_S_FREQUENCY    = 0x402c5639;
-CMD64_VIDIOC_QBUF           = 0xc058560f;
-CMD64_VIDIOC_QUERYBUF       = 0xc0585609;
-CMD64_VIDIOC_QUERYCAP       = 0x80685600;
-CMD64_VIDIOC_QUERYCTRL      = 0xc0445624;
-CMD64_VIDIOC_QUERYSTD       = 0x8008563f;
-CMD64_VIDIOC_REQBUFS        = 0xc0145608;
-CMD64_VIDIOC_STREAMOFF      = 0x40045613;
-CMD64_VIDIOC_STREAMON       = 0x40045612;
-CMD64_VIDIOC_TRY_FMT        = 0xc0d05640;
         
 V4L2_BUF_TYPE_SDR_CAPTURE   = 11;
 V4L2_MEMORY_MMAP            = 1;
@@ -60,52 +46,65 @@ CMD_SET_AGC_MODE          = 0x08;
 CMD_SET_TUNER_GAIN_INDEX  = 0x0d;
 
 # V4L2 API datatypes
-class v4l2_format_sdr(ctypes.Structure):
-    """
-struct v4l2_format_sdr {
-	__u32				pixelformat;
-	__u8				reserved[28];
-} __attribute__ ((packed));
-    """
-    _fields_ = [("pixelformat", ctypes.c_uint32),
-                ("reserved", 28 * ctypes.c_ubyte)]
 
-class v4l2_format_union_fmt(ctypes.Union):
-    _fields_ = [("sdr", v4l2_format_sdr),
-                ("raw_data", 200 * ctypes.c_ubyte)]
+# 32/64 bit alignment
+if (platform.machine().endswith('64')):
+    ctype_alignment = 8
+else:
+    ctype_alignment = 4
+
+class v4l2_format_sdr(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("pixelformat", ctypes.c_uint32),
+        ("reserved", 28 * ctypes.c_ubyte)
+    ]
 
 class v4l2_format(ctypes.Structure):
-    """
-struct v4l2_format {
-	__u32	 type;
-	union {
-		struct v4l2_pix_format		pix;     /* V4L2_BUF_TYPE_VIDEO_CAPTURE */
-		struct v4l2_pix_format_mplane	pix_mp;  /* V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE */
-		struct v4l2_window		win;     /* V4L2_BUF_TYPE_VIDEO_OVERLAY */
-		struct v4l2_vbi_format		vbi;     /* V4L2_BUF_TYPE_VBI_CAPTURE */
-		struct v4l2_sliced_vbi_format	sliced;  /* V4L2_BUF_TYPE_SLICED_VBI_CAPTURE */
-		struct v4l2_format_sdr		sdr;     /* V4L2_BUF_TYPE_SDR_CAPTURE */
-		__u8	raw_data[200];                   /* user-defined */
-	} fmt;
-};
-	"""
-    _fields_ = [("type", ctypes.c_uint32),
-                ("padding", ctypes.c_uint32), # XXX: struct is not packed
-                ("fmt", v4l2_format_union_fmt)]
+    class _u(ctypes.Union):
+        _fields_ = [
+            ("sdr", v4l2_format_sdr),
+            ("raw_data", ctypes.c_char * 200),
+        ]
+
+    _fields_ = [
+        ("type", ctypes.c_uint32),
+        ("___padding", (ctype_alignment - 4) * ctypes.c_ubyte),
+        ("fmt", _u),
+    ]
 
 class v4l2_frequency(ctypes.Structure):
-    """
-struct v4l2_frequency {
-    __u32    tuner;
-    __u32    type;    /* enum v4l2_tuner_type */
-    __u32    frequency;
-    __u32    reserved[8];
-};
-    """
-    _fields_ = [("tuner", ctypes.c_uint32),
-                ("type", ctypes.c_uint32),
-                ("frequency", ctypes.c_uint32),
-                ("reserved", 8 * ctypes.c_uint32)]
+    _fields_ = [
+        ("tuner", ctypes.c_uint32),
+        ("type", ctypes.c_uint32),
+        ("frequency", ctypes.c_uint32),
+        ("reserved", 8 * ctypes.c_uint32)
+    ]
+
+# V4L2 IOCTLs
+_IOC_NRBITS   = 8
+_IOC_TYPEBITS = 8
+_IOC_SIZEBITS = 14
+_IOC_DIRBITS  = 2
+
+_IOC_NRSHIFT   = 0
+_IOC_TYPESHIFT = _IOC_NRSHIFT + _IOC_NRBITS
+_IOC_SIZESHIFT = _IOC_TYPESHIFT + _IOC_TYPEBITS
+_IOC_DIRSHIFT  = _IOC_SIZESHIFT + _IOC_SIZEBITS
+
+_IOC_NONE  = 0
+_IOC_WRITE = 1
+_IOC_READ  = 2
+
+_IOC  = lambda d, t, nr, size: (d << _IOC_DIRSHIFT) | (ord(t) << _IOC_TYPESHIFT) | \
+                               (nr << _IOC_NRSHIFT) | (size << _IOC_SIZESHIFT)
+_IO   = lambda t, nr:       _IOC(_IOC_NONE, t, nr, 0)
+_IOR  = lambda t, nr, size: _IOC(_IOC_READ, t, nr, ctypes.sizeof(size))
+_IOW  = lambda t, nr, size: _IOC(_IOC_WRITE, t, nr, ctypes.sizeof(size))
+_IOWR = lambda t, nr, size: _IOC(_IOC_READ | _IOC_WRITE, t, nr, ctypes.sizeof(size))
+
+VIDIOC_S_FMT                    = _IOWR('V', 5, v4l2_format)
+VIDIOC_S_FREQUENCY              = _IOW('V', 57, v4l2_frequency)
 
 thread_running = False;
 sdr_device = '/dev/swradio0';
@@ -137,10 +136,10 @@ def handle_command():
         return
 
     # select stream format
-    fmt_sdr = v4l2_format_sdr(pixelformat = V4L2_PIX_FMT_SDR_U8)
-    fmt_union = v4l2_format_union_fmt(sdr = fmt_sdr)
-    arg = v4l2_format(type = V4L2_BUF_TYPE_SDR_CAPTURE, fmt = fmt_union)
-    fcntl.ioctl(fd, CMD64_VIDIOC_S_FMT, ctypes.addressof(arg))
+    arg = v4l2_format()
+    arg.type = V4L2_BUF_TYPE_SDR_CAPTURE
+    arg.fmt.sdr.pixelformat = V4L2_PIX_FMT_SDR_U8
+    fcntl.ioctl(fd, VIDIOC_S_FMT, arg)
 
     # start TCP server
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -170,12 +169,18 @@ def handle_command():
             val = ord(data[1]) << 24 | ord(data[2]) << 16 | ord(data[3]) << 8 | ord(data[4]) << 0
             if (cmd == CMD_SET_FREQ):
                 print ('CMD_SET_FREQ'), val
-                arg = v4l2_frequency(tuner = 1, type = V4L2_TUNER_RF, frequency = val)
-                fcntl.ioctl(fd, CMD64_VIDIOC_S_FREQUENCY, ctypes.addressof(arg))
+                arg = v4l2_frequency()
+                arg.tuner = 1
+                arg.type = V4L2_TUNER_RF
+                arg.frequency = val
+                fcntl.ioctl(fd, VIDIOC_S_FREQUENCY, arg)
             elif (cmd == CMD_SET_SAMPLE_RATE):
                 print ('CMD_SET_SAMPLE_RATE'), val
-                arg = v4l2_frequency(tuner = 0, type = V4L2_TUNER_ADC, frequency = val)
-                fcntl.ioctl(fd, CMD64_VIDIOC_S_FREQUENCY, ctypes.addressof(arg))
+                arg = v4l2_frequency()
+                arg.tuner = 0
+                arg.type = V4L2_TUNER_ADC
+                arg.frequency = val
+                fcntl.ioctl(fd, VIDIOC_S_FREQUENCY, arg)
                 sampling_rate_set = True
             elif (cmd == CMD_SET_TUNER_GAIN_MODE):
                 print ('CMD_SET_TUNER_GAIN_MODE'), val
