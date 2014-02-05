@@ -33,8 +33,8 @@ O_RDWR      = 0x0002;    # open for reading and writing
 O_NONBLOCK  = 0x0004;    # no delay
 
 # V4L2 pixformat fourcc
-V4L2_PIX_FMT_SDR_U8         = 0x38305544;
-V4L2_PIX_FMT_SDR_U16LE      = 0x36315544;
+V4L2_SDR_FMT_CU8     = ord('C') << 0 | ord('U') << 8 | ord('0') << 16 | ord('8') << 24;
+V4L2_SDR_FMT_CU16LE  = ord('C') << 0 | ord('U') << 8 | ord('1') << 16 | ord('6') << 24;
 
 # RTL TCP commands
 CMD_SET_FREQ              = 0x01;
@@ -138,7 +138,7 @@ def handle_command():
     # select stream format
     arg = v4l2_format()
     arg.type = V4L2_BUF_TYPE_SDR_CAPTURE
-    arg.fmt.sdr.pixelformat = V4L2_PIX_FMT_SDR_U8
+    arg.fmt.sdr.pixelformat = V4L2_SDR_FMT_CU8
     fcntl.ioctl(fd, VIDIOC_S_FMT, arg)
 
     # start TCP server
